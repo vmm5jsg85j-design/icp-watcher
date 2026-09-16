@@ -41,7 +41,11 @@ def format_snapshot(s) -> str:
         f"• На всех биржах: {_usd(s.volume_usd)}",
     ]
     if getattr(s, "venue_volume_coin", 0):
-        lines.append(f"• Из них на Coinbase: {_amount(s.venue_volume_coin)} ICP")
+        # Also in dollars, or "из них" would be comparing coins to dollars.
+        lines.append(
+            f"• Из них на Coinbase: {_amount(s.venue_volume_coin)} ICP"
+            f" (~{_usd(s.venue_volume_coin * s.price)})"
+        )
 
     lines += [
         "",
