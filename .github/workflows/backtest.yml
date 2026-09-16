@@ -1,0 +1,17 @@
+name: Backtest
+
+# Только вручную. Это разовый аналитический отчёт, а не мониторинг:
+# гонять его по расписанию незачем, история за полчаса не меняется.
+on:
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Отчёт уходит в Summary запуска, а не в Telegram: это длинная таблица
+      # для чтения с экрана, и её место в интерфейсе Actions, а не в чате.
+      - name: Run backtest
+        run: python3 backtest.py | tee -a "$GITHUB_STEP_SUMMARY"
