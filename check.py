@@ -13,11 +13,11 @@ taken from it would be noise. So:
   Coinbase   — 24h high/low, venue volume, and per-trade buy/sell side.
 
 Two modes:
-  python check.py alert    — post only if ICP is up by the threshold
+  python check.py alert    — post only if ICP crossed a rise level (see alert_levels)
   python check.py digest   — always post the 24h snapshot
 
 State lives in state.json, committed back by the workflow: a cron job has no
-memory between runs, and without memory a price above the threshold would
+memory between runs, and without memory a price sitting above a level would
 alert on every single run.
 """
 import json
@@ -29,6 +29,7 @@ import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from alert_levels import LEVELS, decide, normalise_state
 from formatting import format_alert, format_snapshot
 
 COINBASE = "https://api.exchange.coinbase.com"
@@ -151,7 +152,7 @@ def read_state() -> dict:
         with open(STATE_FILE, encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"armed": True}
+        return {}
 
 
 def write_state(state: dict) -> None:
@@ -162,29 +163,29 @@ def write_state(state: dict) -> None:
 
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "alert"
-    threshold = float(os.getenv("ALERT_THRESHOLD_PERCENT", "10"))
-    rearm = float(os.getenv("ALERT_REARM_PERCENT", "8"))
 
     snapshot = fetch()
-    print(f"ICP {snapshot.price:.3f} ({snapshot.change_percent:+.2f}% 24h), mode={mode}")
+    print(
+        f"ICP {snapshot.price:.3f} ({snapshot.change_percent:+.2f}% 24h), "
+        f"mode={mode}, levels={sorted(LEVELS)}"
+    )
 
     if mode == "digest":
         send(format_snapshot(snapshot))
         print("Digest sent.")
         return 0
 
-    state = read_state()
-    armed = bool(state.get("armed", True))
+    armed = normalise_state(read_state())
+    level, new_armed = decide(snapshot.change_percent, armed)
 
-    if snapshot.change_percent >= threshold and armed:
-        send(format_alert(snapshot, threshold))
-        write_state({"armed": False, "last_alert_change": round(snapshot.change_percent, 2)})
-        print(f"Alert sent at {snapshot.change_percent:+.2f}%; disarmed.")
-    elif snapshot.change_percent < rearm and not armed:
-        write_state({"armed": True})
-        print(f"Back to {snapshot.change_percent:+.2f}%; re-armed.")
-    else:
-        print(f"No action (armed={armed}, threshold={threshold}%, re-arm={rearm}%).")
+    if level is not None:
+        send(format_alert(snapshot, level))
+        print(f"Alert sent for the {level:.0f}% level at {snapshot.change_percent:+.2f}%.")
+    if new_armed != armed:
+        write_state({"armed": new_armed, "last_change": round(snapshot.change_percent, 2)})
+        print(f"Armed levels now: {new_armed}")
+    elif level is None:
+        print(f"No action. Armed levels: {armed}")
     return 0
 
 

@@ -42,8 +42,6 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ALERT_THRESHOLD_PERCENT: "10"
-          ALERT_REARM_PERCENT: "8"
           # Значения из github.event кладутся в переменные окружения, а НЕ
           # подставляются в текст скрипта. Прямая подстановка ${{ ... }} внутрь
           # run — классическая дыра GitHub Actions: содержимое поля попадает в

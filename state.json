@@ -1,3 +1,6 @@
 {
-  "armed": true
+  "armed": {
+    "5.0": true,
+    "10.0": true
+  }
 }
