@@ -26,6 +26,8 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from formatting import format_alert, format_snapshot
 
@@ -40,6 +42,11 @@ GECKO_ID = os.getenv("COINGECKO_ID", "internet-computer")
 # answers "who is pushing right now", and the message says exactly that rather
 # than implying a 24-hour figure.
 TRADE_SAMPLE = int(os.getenv("TRADE_SAMPLE", "1000"))
+
+# Times are shown where the reader lives, not where the runner happens to be:
+# a GitHub runner thinks in UTC, which tells a reader in Tashkent nothing.
+LOCAL_TZ = ZoneInfo(os.getenv("DISPLAY_TZ", "Asia/Tashkent"))
+TZ_LABEL = str(LOCAL_TZ).split("/")[-1].replace("_", " ")
 
 STATE_FILE = "state.json"
 TIMEOUT = 25
@@ -103,7 +110,11 @@ def fetch() -> Snapshot:
     )
     stats = _get_json(f"{COINBASE}/products/{PRODUCT}/stats")
     trades = _get_json(f"{COINBASE}/products/{PRODUCT}/trades", {"limit": TRADE_SAMPLE})
-    return Snapshot(gecko, stats, trades)
+    snapshot = Snapshot(gecko, stats, trades)
+    snapshot.generated_at = (
+        f"{datetime.now(LOCAL_TZ).strftime('%d.%m.%Y %H:%M')} ({TZ_LABEL})"
+    )
+    return snapshot
 
 
 def send(text: str) -> None:

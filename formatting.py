@@ -37,11 +37,11 @@ def format_snapshot(s) -> str:
 
     lines += [
         "",
-        "<b>🔄 Оборот за 24 часа</b>",
-        f"• По всему рынку: {_usd(s.volume_usd)}",
+        "<b>🔄 Оборот ICP за 24 часа</b>",
+        f"• На всех биржах: {_usd(s.volume_usd)}",
     ]
     if getattr(s, "venue_volume_coin", 0):
-        lines.append(f"• На Coinbase: {_amount(s.venue_volume_coin)} ICP")
+        lines.append(f"• Из них на Coinbase: {_amount(s.venue_volume_coin)} ICP")
 
     lines += [
         "",
@@ -54,6 +54,8 @@ def format_snapshot(s) -> str:
         "сделки есть и покупатель, и продавец — сторона определяется по тому, "
         "кто её инициировал.</i>",
     ]
+    if getattr(s, "generated_at", ""):
+        lines += ["", f"<i>Данные на {s.generated_at}</i>"]
     return "\n".join(lines)
 
 
