@@ -11,9 +11,9 @@ on:
     # И учтите: GitHub выполняет cron по возможности, а не по секундам — на
     # бесплатном тарифе запуск часто сдвигается на 5-20 минут. Для порога
     # «+10% за 24 часа» это несущественно, для секундных сигналов не годится.
-    - cron: "*/30 * * * *"
-    # Ежедневная сводка в 09:00 по Ташкенту (UTC+5).
-    - cron: "0 4 * * *"
+    - cron: "7,37 * * * *"
+    # Ежедневная сводка около 09:00 по Ташкенту (UTC+5).
+    - cron: "13 4 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -52,17 +52,14 @@ jobs:
           SCHEDULE: ${{ github.event.schedule }}
           INPUT_MODE: ${{ github.event.inputs.mode }}
         run: |
+          set -euo pipefail
           MODE=alert
-          if [ "$SCHEDULE" = "0 4 * * *" ]; then MODE=digest; fi
-          if [ -n "$INPUT_MODE" ]; then MODE="$INPUT_MODE"; fi
+          if [ "${SCHEDULE:-}" = "13 4 * * *" ]; then MODE=digest; fi
+          if [ -n "${INPUT_MODE:-}" ]; then MODE="$INPUT_MODE"; fi
           case "$MODE" in
             alert|digest) ;;
             *) echo "Недопустимый режим: $MODE"; exit 1 ;;
           esac
-          python3 check.py "$MODE"|
-          MODE=alert
-          if [ "${{ github.event.schedule }}" = "0 4 * * *" ]; then MODE=digest; fi
-          if [ -n "${{ github.event.inputs.mode }}" ]; then MODE="${{ github.event.inputs.mode }}"; fi
           python3 check.py "$MODE"
 
       - name: Persist alert state
