@@ -1,61 +1,84 @@
 """One-shot ICP check, built for GitHub Actions.
 
-Standard library only — no pip install step in the workflow, nothing to break
-when a dependency releases a new version, and a run that finishes in seconds.
+Standard library only — no pip install step, nothing to break when a dependency
+releases a new version, and a run that finishes in seconds.
+
+Why not Binance, which is the obvious choice: it answers 451 "Service
+unavailable from a restricted location" to US IP addresses, and GitHub's hosted
+runners are in the US. Verified on a real runner, not assumed. Binance.US does
+answer, but its ICP book is nearly empty — the turnover and the buy/sell ratio
+taken from it would be noise. So:
+
+  CoinGecko  — price, 24h change and GLOBAL turnover across all venues.
+  Coinbase   — 24h high/low, venue volume, and per-trade buy/sell side.
 
 Two modes:
-  python check.py alert    — post only if ICP is up by the threshold (default)
+  python check.py alert    — post only if ICP is up by the threshold
   python check.py digest   — always post the 24h snapshot
 
-State lives in state.json, committed back to the repo by the workflow. A cron
-job has no memory between runs, and without memory a price sitting above the
-threshold would alert on every single run. Same two-state machine as the
-always-on bot: armed until it fires, re-armed only once the move falls back
-below the lower re-arm level.
+State lives in state.json, committed back by the workflow: a cron job has no
+memory between runs, and without memory a price above the threshold would
+alert on every single run.
 """
 import json
 import os
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
 from formatting import format_alert, format_snapshot
 
-BINANCE = "https://api.binance.com/api/v3"
-SYMBOL = os.getenv("BINANCE_SYMBOL", "ICPUSDT")
-THRESHOLD = float(os.getenv("ALERT_THRESHOLD_PERCENT", "10"))
-REARM = float(os.getenv("ALERT_REARM_PERCENT", "8"))
+COINBASE = "https://api.exchange.coinbase.com"
+COINGECKO = "https://api.coingecko.com/api/v3"
+PRODUCT = os.getenv("COINBASE_PRODUCT", "ICP-USD")
+GECKO_ID = os.getenv("COINGECKO_ID", "internet-computer")
+
+# How many recent trades to read for the buy/sell split. A full 24 hours would
+# mean ~85k trades and dozens of paginated requests every run, which is far too
+# heavy for a job that runs every half hour. One page of the most recent trades
+# answers "who is pushing right now", and the message says exactly that rather
+# than implying a 24-hour figure.
+TRADE_SAMPLE = int(os.getenv("TRADE_SAMPLE", "1000"))
+
 STATE_FILE = "state.json"
 TIMEOUT = 25
+# Some of these endpoints sit behind Cloudflare and reject urllib's default
+# User-Agent outright.
+HEADERS = {"Accept": "application/json", "User-Agent": "icp-watcher/1.0"}
 
 
-def _get_json(url: str, params: dict):
-    full = f"{url}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(full, headers={"Accept": "application/json"})
+def _get_json(url: str, params: dict | None = None):
+    full = f"{url}?{urllib.parse.urlencode(params)}" if params else url
+    req = urllib.request.Request(full, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 class Snapshot:
-    """Same attribute names as icp_client.MarketSnapshot, so formatting.py can
-    render either one."""
+    def __init__(self, gecko: dict, stats: dict, trades: list):
+        g = gecko.get(GECKO_ID, {})
+        self.price = float(g.get("usd") or stats["last"])
+        self.change_percent = float(g.get("usd_24h_change") or 0.0)
+        self.market_cap = float(g.get("usd_market_cap") or 0.0)
+        # Global turnover in dollars: what the whole market traded, not one venue.
+        self.volume_usd = float(g.get("usd_24h_vol") or 0.0)
 
-    def __init__(self, ticker: dict, klines: list):
-        self.price = float(ticker["lastPrice"])
-        self.open_price = float(ticker["openPrice"])
-        self.change_percent = float(ticker["priceChangePercent"])
-        self.high = float(ticker["highPrice"])
-        self.low = float(ticker["lowPrice"])
-        self.volume_coin = float(ticker["volume"])
-        self.volume_usd = float(ticker["quoteVolume"])
-        self.trades = int(ticker["count"])
+        self.high = float(stats["high"])
+        self.low = float(stats["low"])
+        self.open_price = float(stats["open"])
+        # Venue volume, in ICP, on Coinbase alone.
+        self.venue_volume_coin = float(stats["volume"])
 
-        # Kline indexes: 5 = base volume, 7 = quote volume,
-        # 9 = taker BUY base volume, 10 = taker buy quote volume.
-        self.bought_coin = sum(float(k[9]) for k in klines)
-        self.sold_coin = max(0.0, sum(float(k[5]) for k in klines) - self.bought_coin)
-        self.bought_usd = sum(float(k[10]) for k in klines)
-        self.sold_usd = max(0.0, sum(float(k[7]) for k in klines) - self.bought_usd)
+        self.trade_count = len(trades)
+        self.bought_coin = sum(float(t["size"]) for t in trades if t.get("side") == "buy")
+        self.sold_coin = sum(float(t["size"]) for t in trades if t.get("side") == "sell")
+        self.bought_usd = sum(
+            float(t["size"]) * float(t["price"]) for t in trades if t.get("side") == "buy"
+        )
+        self.sold_usd = sum(
+            float(t["size"]) * float(t["price"]) for t in trades if t.get("side") == "sell"
+        )
 
     @property
     def bought_share(self) -> float:
@@ -68,9 +91,19 @@ class Snapshot:
 
 
 def fetch() -> Snapshot:
-    ticker = _get_json(f"{BINANCE}/ticker/24hr", {"symbol": SYMBOL})
-    klines = _get_json(f"{BINANCE}/klines", {"symbol": SYMBOL, "interval": "1h", "limit": 24})
-    return Snapshot(ticker, klines)
+    gecko = _get_json(
+        f"{COINGECKO}/simple/price",
+        {
+            "ids": GECKO_ID,
+            "vs_currencies": "usd",
+            "include_market_cap": "true",
+            "include_24hr_vol": "true",
+            "include_24hr_change": "true",
+        },
+    )
+    stats = _get_json(f"{COINBASE}/products/{PRODUCT}/stats")
+    trades = _get_json(f"{COINBASE}/products/{PRODUCT}/trades", {"limit": TRADE_SAMPLE})
+    return Snapshot(gecko, stats, trades)
 
 
 def send(text: str) -> None:
@@ -87,11 +120,18 @@ def send(text: str) -> None:
         data=payload,
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        # Never surface the exception verbatim: its URL carries the bot token.
+        detail = ""
+        try:
+            detail = json.loads(e.read().decode("utf-8")).get("description", "")
+        except Exception:
+            pass
+        raise RuntimeError(f"Telegram returned {e.code}: {detail}") from None
     if not body.get("ok"):
-        # Never print the response verbatim: on some errors Telegram echoes the
-        # request URL, which carries the bot token.
         raise RuntimeError(f"Telegram rejected the message: {body.get('description')}")
 
 
@@ -111,8 +151,11 @@ def write_state(state: dict) -> None:
 
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "alert"
+    threshold = float(os.getenv("ALERT_THRESHOLD_PERCENT", "10"))
+    rearm = float(os.getenv("ALERT_REARM_PERCENT", "8"))
+
     snapshot = fetch()
-    print(f"{SYMBOL}: {snapshot.price:.3f} ({snapshot.change_percent:+.2f}% 24h), mode={mode}")
+    print(f"ICP {snapshot.price:.3f} ({snapshot.change_percent:+.2f}% 24h), mode={mode}")
 
     if mode == "digest":
         send(format_snapshot(snapshot))
@@ -122,15 +165,15 @@ def main() -> int:
     state = read_state()
     armed = bool(state.get("armed", True))
 
-    if snapshot.change_percent >= THRESHOLD and armed:
-        send(format_alert(snapshot, THRESHOLD))
+    if snapshot.change_percent >= threshold and armed:
+        send(format_alert(snapshot, threshold))
         write_state({"armed": False, "last_alert_change": round(snapshot.change_percent, 2)})
         print(f"Alert sent at {snapshot.change_percent:+.2f}%; disarmed.")
-    elif snapshot.change_percent < REARM and not armed:
+    elif snapshot.change_percent < rearm and not armed:
         write_state({"armed": True})
         print(f"Back to {snapshot.change_percent:+.2f}%; re-armed.")
     else:
-        print(f"No action (armed={armed}, threshold={THRESHOLD}%, re-arm={REARM}%).")
+        print(f"No action (armed={armed}, threshold={threshold}%, re-arm={rearm}%).")
     return 0
 
 

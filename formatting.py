@@ -1,8 +1,7 @@
 """Number and message formatting.
 
-Deliberately imports NOTHING: both the always-on bot and the dependency-free
-cron script build the same shaped snapshot object and share this wording, so a
-change to the text lands in both without dragging httpx into a cron job.
+Deliberately imports NOTHING, so the dependency-free cron script and the
+always-on bot share the same wording.
 """
 
 
@@ -22,29 +21,40 @@ def _usd(value: float) -> str:
 
 
 def _signed(percent: float) -> str:
-    arrow = "🟢 +" if percent > 0 else ("🔴 " if percent < 0 else "⚪ ")
-    return f"{arrow}{percent:.2f}%"
+    mark = "🟢 +" if percent > 0 else ("🔴 " if percent < 0 else "⚪ ")
+    return f"{mark}{percent:.2f}%"
 
 
 def format_snapshot(s) -> str:
-    return "\n".join([
+    lines = [
         "📊 <b>Internet Computer (ICP)</b>",
         "",
         f"💵 Цена: <b>${s.price:.3f}</b>   {_signed(s.change_percent)} за 24 ч",
         f"📈 Максимум: ${s.high:.3f}    📉 Минимум: ${s.low:.3f}",
+    ]
+    if getattr(s, "market_cap", 0):
+        lines.append(f"🏦 Капитализация: {_usd(s.market_cap)}")
+
+    lines += [
         "",
         "<b>🔄 Оборот за 24 часа</b>",
-        f"• {_amount(s.volume_coin)} ICP — {_usd(s.volume_usd)}",
-        f"• Сделок: {_amount(s.trades)}",
+        f"• По всему рынку: {_usd(s.volume_usd)}",
+    ]
+    if getattr(s, "venue_volume_coin", 0):
+        lines.append(f"• На Coinbase: {_amount(s.venue_volume_coin)} ICP")
+
+    lines += [
         "",
-        "<b>⚖️ Кто был активнее</b>",
+        f"<b>⚖️ Кто активнее — последние {_amount(s.trade_count)} сделок</b>",
         f"• Покупали: {_amount(s.bought_coin)} ICP — {_usd(s.bought_usd)} ({s.bought_share:.1f}%)",
         f"• Продавали: {_amount(s.sold_coin)} ICP — {_usd(s.sold_usd)} ({s.sold_share:.1f}%)",
         "",
-        "<i>Разбивка — по инициатору сделки. У каждой сделки есть и покупатель, "
-        "и продавец, поэтому это оценка того, кто продавливал цену, а не буквальный "
-        "подсчёт купленного и проданного.</i>",
-    ])
+        "<i>Соотношение считается по свежим сделкам на Coinbase, а не за все "
+        "сутки: это срез того, кто продавливает цену прямо сейчас. У каждой "
+        "сделки есть и покупатель, и продавец — сторона определяется по тому, "
+        "кто её инициировал.</i>",
+    ]
+    return "\n".join(lines)
 
 
 def format_alert(s, threshold: float) -> str:
@@ -52,9 +62,9 @@ def format_alert(s, threshold: float) -> str:
         f"🚀 <b>ICP вырос на {s.change_percent:.1f}% за 24 часа</b>",
         f"<i>(порог уведомления — {threshold:.0f}%)</i>",
         "",
-        f"💵 Цена: <b>${s.price:.3f}</b>   было ${s.open_price:.3f}",
-        f"🔄 Оборот: {_amount(s.volume_coin)} ICP — {_usd(s.volume_usd)}",
-        f"⚖️ Покупали {s.bought_share:.1f}% / продавали {s.sold_share:.1f}%",
+        f"💵 Цена: <b>${s.price:.3f}</b>",
+        f"🔄 Оборот по рынку за сутки: {_usd(s.volume_usd)}",
+        f"⚖️ По свежим сделкам: покупали {s.bought_share:.1f}% / продавали {s.sold_share:.1f}%",
         "",
         "Это не инвестиционная рекомендация.",
     ])
