@@ -1,0 +1,21 @@
+name: Probe sources
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Which crypto APIs are reachable from a US runner
+        run: |
+          probe() {
+            code=$(curl -s -o /tmp/body -w "%{http_code}" --max-time 20 "$2" || echo "000")
+            echo "=== $1 -> HTTP $code"
+            head -c 200 /tmp/body; echo; echo
+          }
+          probe "binance.com ticker"  "https://api.binance.com/api/v3/ticker/24hr?symbol=ICPUSDT"
+          probe "binance.us  ticker"  "https://api.binance.us/api/v3/ticker/24hr?symbol=ICPUSD"
+          probe "binance.us  klines"  "https://api.binance.us/api/v3/klines?symbol=ICPUSD&interval=1h&limit=2"
+          probe "coingecko   price"   "https://api.coingecko.com/api/v3/simple/price?ids=internet-computer&vs_currencies=usd&include_24hr_vol=true&include_24hr_change=true"
+          probe "kraken      ticker"  "https://api.kraken.com/0/public/Ticker?pair=ICPUSD"
+          probe "coinbase    stats"   "https://api.exchange.coinbase.com/products/ICP-USD/stats"
+          probe "coinbase    trades"  "https://api.exchange.coinbase.com/products/ICP-USD/trades?limit=2"
