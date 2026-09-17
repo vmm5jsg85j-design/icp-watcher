@@ -63,10 +63,17 @@ def format_snapshot(s) -> str:
     return "\n".join(lines)
 
 
-def format_alert(s, threshold: float) -> str:
+def format_alert(s, level: float) -> str:
+    """One wording for both ladders. `level` carries the direction: positive
+    for a rise, negative for a fall. The headline reads the change itself, so
+    a -4.7% drop announced under the -4% level says -4.7%, not -4%."""
+    if level > 0:
+        headline = f"🚀 <b>ICP вырос на {s.change_percent:.1f}% за 24 часа</b>"
+    else:
+        headline = f"🔻 <b>ICP упал на {abs(s.change_percent):.1f}% за 24 часа</b>"
     return "\n".join([
-        f"🚀 <b>ICP вырос на {s.change_percent:.1f}% за 24 часа</b>",
-        f"<i>(порог уведомления — {threshold:.0f}%)</i>",
+        headline,
+        f"<i>(порог уведомления — {level:+.0f}%)</i>",
         "",
         f"💵 Цена: <b>${s.price:.3f}</b>",
         f"🔄 Оборот по рынку за сутки: {_usd(s.volume_usd)}",
