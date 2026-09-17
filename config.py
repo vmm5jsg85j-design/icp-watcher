@@ -52,15 +52,28 @@ if not TELEGRAM_BOT_TOKEN:
     raise RuntimeError("TELEGRAM_BOT_TOKEN is not set — add it to .env")
 
 
-# --- Market data (Binance public API, no key required) ---
-BINANCE_SYMBOL = os.getenv("BINANCE_SYMBOL", "ICPUSDT").strip().upper()
+# --- Market data (public endpoints, no key required) ---
+# See icp_client for why these two and not Binance.
+COINGECKO_ID = os.getenv("COINGECKO_ID", "internet-computer").strip()
+COINBASE_PRODUCT = os.getenv("COINBASE_PRODUCT", "ICP-USD").strip().upper()
 
-# How often the 24h move is checked. Binance's public rate limits are far above
-# this; 60s is simply enough resolution for a 24-hour percentage.
+# How many recent trades the buy/sell split is taken from. A full 24 hours is
+# ~85k trades and dozens of paginated requests; one page answers "who is
+# pushing right now", and the message says exactly that.
+TRADE_SAMPLE = int(os.getenv("TRADE_SAMPLE", "1000"))
+
+# How often the 24h move is checked. 60s is ample resolution for a figure that
+# covers a whole day, and keeps well inside both vendors' rate limits.
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "60"))
 
-# Fire an alert once the 24h change reaches this, then stay silent until it
-# drops back under ALERT_REARM_PERCENT. Without that gap a price sitting at
-# exactly the threshold would alert on every single poll.
-ALERT_THRESHOLD_PERCENT = float(os.getenv("ALERT_THRESHOLD_PERCENT", "10"))
-ALERT_REARM_PERCENT = float(os.getenv("ALERT_REARM_PERCENT", "8"))
+# Alert levels live in alert_levels.LEVELS: they are logic, not deployment
+# configuration, and each level belongs next to its own re-arm point.
+
+# --- Delivery ---
+# Optional group or channel that gets alerts and the daily digest in addition
+# to individual subscribers. Empty means personal chats only.
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+
+# Times are shown where the reader lives, not where the server happens to run.
+DISPLAY_TZ = os.getenv("DISPLAY_TZ", "Asia/Tashkent").strip()
+DIGEST_HOUR = int(os.getenv("DIGEST_HOUR", "9"))

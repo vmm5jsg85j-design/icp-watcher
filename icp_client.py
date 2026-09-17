@@ -1,45 +1,64 @@
-"""Binance public market data for ICP. No API key, no account, no signing —
-these are open endpoints, which is the whole reason this bot needs no secrets
-beyond the Telegram token.
+"""Market data for ICP, from sources that answer everywhere.
+
+Binance is the obvious choice and the wrong one here: it replies 451 "Service
+unavailable from a restricted location" to US IP addresses, and this runs on a
+US-hosted worker. Verified against a real US host, not assumed. Binance.US does
+answer, but its ICP book is nearly empty, so turnover and the buy/sell ratio
+taken from it would be noise.
+
+  CoinGecko — price, 24h change, market cap and GLOBAL turnover across venues.
+  Coinbase  — 24h high/low, venue volume, and per-trade buy/sell side.
+
+check.py talks to the same two endpoints over the standard library, because a
+GitHub Actions job should not need a pip install. That duplication is
+deliberate and small; the wording both produce lives in formatting.py, so the
+two cannot drift apart in what they say.
 """
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 
-from config import BINANCE_SYMBOL
+from config import COINBASE_PRODUCT, COINGECKO_ID, DISPLAY_TZ, TRADE_SAMPLE
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://api.binance.com/api/v3"
-TIMEOUT_SECONDS = 20
+COINBASE = "https://api.exchange.coinbase.com"
+COINGECKO = "https://api.coingecko.com/api/v3"
+TIMEOUT_SECONDS = 25
+# Both sit behind Cloudflare, which rejects some default clients outright.
+HEADERS = {"Accept": "application/json", "User-Agent": "icp-watcher/1.0"}
+
+LOCAL_TZ = ZoneInfo(DISPLAY_TZ)
+TZ_LABEL = DISPLAY_TZ.split("/")[-1].replace("_", " ")
 
 
 class MarketSnapshot:
-    """One 24-hour picture of the market: price, movement, turnover, and which
-    side was doing the pushing."""
+    """Attribute names match check.Snapshot so formatting.py renders either."""
 
-    def __init__(self, ticker: dict, klines: list[list]):
-        self.price = float(ticker["lastPrice"])
-        self.open_price = float(ticker["openPrice"])
-        self.change_percent = float(ticker["priceChangePercent"])
-        self.high = float(ticker["highPrice"])
-        self.low = float(ticker["lowPrice"])
-        self.volume_coin = float(ticker["volume"])       # in ICP
-        self.volume_usd = float(ticker["quoteVolume"])   # in USDT
-        self.trades = int(ticker["count"])
+    def __init__(self, gecko: dict, stats: dict, trades: list):
+        g = gecko.get(COINGECKO_ID, {})
+        self.price = float(g.get("usd") or stats["last"])
+        self.change_percent = float(g.get("usd_24h_change") or 0.0)
+        self.market_cap = float(g.get("usd_market_cap") or 0.0)
+        self.volume_usd = float(g.get("usd_24h_vol") or 0.0)
 
-        # Binance kline layout, by index:
-        #   5 = base volume, 7 = quote volume, 9 = TAKER BUY base volume,
-        #   10 = taker buy quote volume.
-        # Summing 24 hourly candles matches the rolling 24h window the ticker
-        # reports; the daily candle would instead mean "since 00:00 UTC", which
-        # would quietly disagree with the percentage next to it.
-        self.bought_coin = sum(float(k[9]) for k in klines)
-        window_volume = sum(float(k[5]) for k in klines)
-        self.sold_coin = max(0.0, window_volume - self.bought_coin)
-        self.bought_usd = sum(float(k[10]) for k in klines)
-        window_volume_usd = sum(float(k[7]) for k in klines)
-        self.sold_usd = max(0.0, window_volume_usd - self.bought_usd)
+        self.high = float(stats["high"])
+        self.low = float(stats["low"])
+        self.open_price = float(stats["open"])
+        self.venue_volume_coin = float(stats["volume"])
+
+        self.trade_count = len(trades)
+        self.bought_coin = sum(float(t["size"]) for t in trades if t.get("side") == "buy")
+        self.sold_coin = sum(float(t["size"]) for t in trades if t.get("side") == "sell")
+        self.bought_usd = sum(
+            float(t["size"]) * float(t["price"]) for t in trades if t.get("side") == "buy"
+        )
+        self.sold_usd = sum(
+            float(t["size"]) * float(t["price"]) for t in trades if t.get("side") == "sell"
+        )
+        self.generated_at = f"{datetime.now(LOCAL_TZ).strftime('%d.%m.%Y %H:%M')} ({TZ_LABEL})"
 
     @property
     def bought_share(self) -> float:
@@ -52,18 +71,31 @@ class MarketSnapshot:
 
 
 async def fetch_snapshot() -> MarketSnapshot | None:
-    """Both calls in one client session. Returns None on any failure — callers
-    are loops and command handlers that must not die over a blip."""
+    """Returns None on any failure: the callers are a background loop and a
+    command handler, and neither should die over a blip at one vendor."""
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
-            ticker_resp = await client.get(f"{BASE_URL}/ticker/24hr", params={"symbol": BINANCE_SYMBOL})
-            ticker_resp.raise_for_status()
-            klines_resp = await client.get(
-                f"{BASE_URL}/klines",
-                params={"symbol": BINANCE_SYMBOL, "interval": "1h", "limit": 24},
+        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, headers=HEADERS) as client:
+            gecko_resp = await client.get(
+                f"{COINGECKO}/simple/price",
+                params={
+                    "ids": COINGECKO_ID,
+                    "vs_currencies": "usd",
+                    "include_market_cap": "true",
+                    "include_24hr_vol": "true",
+                    "include_24hr_change": "true",
+                },
             )
-            klines_resp.raise_for_status()
-        return MarketSnapshot(ticker_resp.json(), klines_resp.json())
+            gecko_resp.raise_for_status()
+
+            stats_resp = await client.get(f"{COINBASE}/products/{COINBASE_PRODUCT}/stats")
+            stats_resp.raise_for_status()
+
+            trades_resp = await client.get(
+                f"{COINBASE}/products/{COINBASE_PRODUCT}/trades", params={"limit": TRADE_SAMPLE}
+            )
+            trades_resp.raise_for_status()
+
+        return MarketSnapshot(gecko_resp.json(), stats_resp.json(), trades_resp.json())
     except Exception:
-        logger.exception("Failed to fetch %s market data from Binance", BINANCE_SYMBOL)
+        logger.exception("Failed to fetch ICP market data")
         return None

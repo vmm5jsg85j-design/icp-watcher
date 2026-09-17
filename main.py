@@ -8,12 +8,13 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 
-from config import ADMIN_CHAT_IDS, ALERT_THRESHOLD_PERCENT, LOG_LEVEL, TELEGRAM_BOT_TOKEN
+from alert_levels import LEVELS
+from config import ADMIN_CHAT_IDS, DIGEST_HOUR, DISPLAY_TZ, LOG_LEVEL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from database import init_db
 from handlers.basic import router as basic_router
 from handlers.icp import router as icp_router
 from logging_setup import setup_logging
-from price_monitor import price_monitor_loop
+from price_monitor import daily_digest_loop, price_monitor_loop
 
 setup_logging(LOG_LEVEL)
 logger = logging.getLogger(__name__)
@@ -43,7 +44,12 @@ async def main() -> None:
 
     if not ADMIN_CHAT_IDS:
         logger.warning("ADMIN_CHAT_IDS is empty — no one can use admin commands. Send /whoami to the bot.")
-    logger.info("Rise alert threshold: +%.1f%% over 24h", ALERT_THRESHOLD_PERCENT)
+    logger.info("Rise alert levels: %s%% over 24h", sorted(LEVELS))
+    logger.info("Daily digest at %02d:00 %s", DIGEST_HOUR, DISPLAY_TZ)
+    if TELEGRAM_CHAT_ID:
+        logger.info("Group delivery enabled: %s", TELEGRAM_CHAT_ID)
+    else:
+        logger.info("Group delivery disabled (TELEGRAM_CHAT_ID not set)")
 
     # Drops anything queued while the bot was down. Without this a restart after
     # an outage replays every message users sent in the meantime.
@@ -60,6 +66,7 @@ async def main() -> None:
     await asyncio.gather(
         dp.start_polling(bot),
         price_monitor_loop(bot),
+        daily_digest_loop(bot),
     )
 
 
