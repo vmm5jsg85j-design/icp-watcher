@@ -35,7 +35,7 @@ https://api.telegram.org/bot<ВАШ_ТОКЕН>/getUpdates
 Создайте репозиторий на GitHub и запушьте туда эту папку:
 
 ```bash
-cd /c/new-bot
+cd /c/icp-watcher
 git remote add origin https://github.com/<вы>/<репозиторий>.git
 git push -u origin master
 ```
