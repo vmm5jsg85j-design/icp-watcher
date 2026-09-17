@@ -8,7 +8,7 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeDefault
 
-from alert_levels import LEVELS
+from alert_levels import FALL_LEVELS, RISE_LEVELS
 from config import ADMIN_CHAT_IDS, DIGEST_HOUR, DISPLAY_TZ, LOG_LEVEL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 from database import init_db
 from handlers.basic import router as basic_router
@@ -44,7 +44,10 @@ async def main() -> None:
 
     if not ADMIN_CHAT_IDS:
         logger.warning("ADMIN_CHAT_IDS is empty — no one can use admin commands. Send /whoami to the bot.")
-    logger.info("Rise alert levels: %s%% over 24h", sorted(LEVELS))
+    logger.info(
+        "Alert levels over 24h: rise %s%%, fall %s%%",
+        sorted(RISE_LEVELS), sorted(FALL_LEVELS),
+    )
     logger.info("Daily digest at %02d:00 %s", DIGEST_HOUR, DISPLAY_TZ)
     if TELEGRAM_CHAT_ID:
         logger.info("Group delivery enabled: %s", TELEGRAM_CHAT_ID)

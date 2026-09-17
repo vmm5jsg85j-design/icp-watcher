@@ -1,11 +1,12 @@
-"""Background loops: rise alerts on two levels, and a daily digest.
+"""Background loops: move alerts on several levels, and a daily digest.
 
 The hard part of a threshold alert is not noticing the threshold — it is not
 notifying about it fifty times in a row. Each level is a two-state machine
 persisted in the database: armed until it fires, re-armed only once the move
-falls back under a lower point. That gap stops a price hovering at exactly the
-threshold from ringing every cycle, and storing it in the database rather than
-in memory means a restart does not re-send an alert already delivered.
+retreats past a nearer point — below it for a rise level, above it for a fall
+one. That gap stops a price resting on a threshold from ringing every cycle,
+and storing it in the database rather than in memory means a restart does not
+re-send an alert already delivered.
 
 Levels and their re-arm points live in alert_levels, shared with the one-shot
 GitHub Actions script so both behave identically.
@@ -27,6 +28,8 @@ from icp_client import fetch_snapshot
 
 logger = logging.getLogger(__name__)
 
+# The name predates the fall levels. Renaming it would orphan the stored map
+# and re-arm every level at once, so it stays as it is.
 ALERT_STATE_KEY = "rise_alert_armed"
 LOCAL_TZ = ZoneInfo(DISPLAY_TZ)
 
@@ -76,7 +79,7 @@ async def price_monitor_loop(bot: Bot) -> None:
                 if level is not None:
                     sent = await _broadcast(bot, format_alert(snapshot, level))
                     logger.info(
-                        "ICP %+.2f%% crossed the %.0f%% level — alerted %s chat(s)",
+                        "ICP %+.2f%% crossed the %+.0f%% level — alerted %s chat(s)",
                         snapshot.change_percent, level, sent,
                     )
                 if new_armed != armed:

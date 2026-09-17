@@ -29,7 +29,7 @@ async def cmd_alerts(message: Message) -> None:
 
     if arg in ("on", "вкл"):
         await db.set_alerts(message.chat.id, True)
-        await message.answer("🔔 Уведомления о росте включены.")
+        await message.answer("🔔 Уведомления о резких движениях включены.")
     elif arg in ("off", "выкл"):
         await db.set_alerts(message.chat.id, False)
         await message.answer("🔕 Уведомления отключены. Вернуть — /alerts on")

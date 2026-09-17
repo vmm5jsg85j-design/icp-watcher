@@ -1,0 +1,17 @@
+name: Tests
+
+# Runs on every push and PR. The alert ladders are pure logic with state
+# carried between calls — exactly the kind of thing that looks right when read
+# and is wrong when run.
+on: [push, pull_request]
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python is on ubuntu-latest out of the box, and the tested module is
+      # standard library only — same reason icp.yml skips setup-python and pip.
+      - name: Run unit tests
+        run: python3 -m unittest discover -v

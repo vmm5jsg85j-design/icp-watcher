@@ -13,7 +13,7 @@ taken from it would be noise. So:
   Coinbase   — 24h high/low, venue volume, and per-trade buy/sell side.
 
 Two modes:
-  python check.py alert    — post only if ICP crossed a rise level (see alert_levels)
+  python check.py alert    — post only if ICP crossed a level (see alert_levels)
   python check.py digest   — always post the 24h snapshot
 
 State lives in state.json, committed back by the workflow: a cron job has no
@@ -180,7 +180,7 @@ def main() -> int:
 
     if level is not None:
         send(format_alert(snapshot, level))
-        print(f"Alert sent for the {level:.0f}% level at {snapshot.change_percent:+.2f}%.")
+        print(f"Alert sent for the {level:+.0f}% level at {snapshot.change_percent:+.2f}%.")
     if new_armed != armed:
         write_state({"armed": new_armed, "last_change": round(snapshot.change_percent, 2)})
         print(f"Armed levels now: {new_armed}")
