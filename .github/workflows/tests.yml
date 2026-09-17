@@ -1,8 +1,8 @@
 name: Tests
 
-# Runs on every push and PR. The alert ladders are pure logic with state
-# carried between calls — exactly the kind of thing that looks right when read
-# and is wrong when run.
+# Runs on every push and PR. Two things here are worth a machine checking: the
+# alert ladders, which are pure logic with state carried between calls, and the
+# buy/sell split, which is duplicated across two files and was wrong in both.
 on: [push, pull_request]
 
 jobs:
@@ -11,7 +11,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Python is on ubuntu-latest out of the box, and the tested module is
-      # standard library only — same reason icp.yml skips setup-python and pip.
+      # alert_levels and check.py are standard library only, but the snapshot
+      # tests also import icp_client, which needs httpx and python-dotenv.
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
       - name: Run unit tests
         run: python3 -m unittest discover -v

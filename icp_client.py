@@ -7,7 +7,8 @@ answer, but its ICP book is nearly empty, so turnover and the buy/sell ratio
 taken from it would be noise.
 
   CoinGecko — price, 24h change, market cap and GLOBAL turnover across venues.
-  Coinbase  — 24h high/low, venue volume, and per-trade buy/sell side.
+  Coinbase  — 24h high/low, venue volume, and the per-trade maker side, from
+              which the taker side is derived below.
 
 check.py talks to the same two endpoints over the standard library, because a
 GitHub Actions job should not need a pip install. That duplication is
@@ -50,14 +51,21 @@ class MarketSnapshot:
         self.venue_volume_coin = float(stats["volume"])
 
         self.trade_count = len(trades)
-        self.bought_coin = sum(float(t["size"]) for t in trades if t.get("side") == "buy")
-        self.sold_coin = sum(float(t["size"]) for t in trades if t.get("side") == "sell")
-        self.bought_usd = sum(
-            float(t["size"]) * float(t["price"]) for t in trades if t.get("side") == "buy"
-        )
-        self.sold_usd = sum(
-            float(t["size"]) * float(t["price"]) for t in trades if t.get("side") == "sell"
-        )
+
+        # Coinbase reports `side` as the MAKER's side — the order that was
+        # already resting on the book. A trade tagged "buy" hit a resting bid,
+        # so the TAKER was selling; "sell" means the taker bought. Verified
+        # against the tape: across 1000 trades, "buy" came with a down-tick 307
+        # times to 72 up-ticks, "sell" with an up-tick 297 to 59. Binance's
+        # taker-buy volume, which this replaced, meant the opposite, and
+        # reading one as the other inverts the entire buy/sell split.
+        taker_bought = [t for t in trades if t.get("side") == "sell"]
+        taker_sold = [t for t in trades if t.get("side") == "buy"]
+
+        self.bought_coin = sum(float(t["size"]) for t in taker_bought)
+        self.sold_coin = sum(float(t["size"]) for t in taker_sold)
+        self.bought_usd = sum(float(t["size"]) * float(t["price"]) for t in taker_bought)
+        self.sold_usd = sum(float(t["size"]) * float(t["price"]) for t in taker_sold)
         self.generated_at = f"{datetime.now(LOCAL_TZ).strftime('%d.%m.%Y %H:%M')} ({TZ_LABEL})"
 
     @property
